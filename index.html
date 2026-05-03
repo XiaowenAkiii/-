@@ -1,0 +1,1481 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文字粒子交互 - Particle Sand</title>
+<style>
+  :root {
+    --panel-bg: rgba(20, 20, 40, 0.92);
+    --text: #cdd6f4;
+    --accent: #89b4fa;
+    --slider-track: #45475a;
+    --border: rgba(255,255,255,0.08);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    width:100vw; height:100vh; overflow:hidden;
+    font-family: 'SF Pro', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+    background:#0f0f1a;
+  }
+  canvas { display:block; position:fixed; top:0; left:0; }
+
+  /* Panel */
+  #panel {
+    position:fixed; top:16px; right:16px; bottom:16px;
+    width:280px; z-index:10;
+    background:var(--panel-bg);
+    border:1px solid var(--border);
+    border-radius:16px;
+    backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    display:flex; flex-direction:column;
+    transition: transform 0.35s cubic-bezier(0.4,0,0.2,1), opacity 0.3s;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  #panel.collapsed { transform:translateX(calc(100% + 20px)); opacity:0; pointer-events:none; }
+
+  #panel-toggle {
+    position:fixed; top:24px; right:24px; z-index:11;
+    width:40px; height:40px; border-radius:50%;
+    border:1px solid var(--border);
+    background:var(--panel-bg);
+    color:var(--text); font-size:18px;
+    cursor:pointer; display:flex; align-items:center; justify-content:center;
+    backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    transition: all 0.3s;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  }
+  #panel-toggle:hover { background:rgba(40,40,70,0.92); border-color:rgba(255,255,255,0.2); }
+  #panel-toggle.hidden { opacity:0; pointer-events:none; }
+
+  .panel-header {
+    padding:18px 20px 14px;
+    font-size:15px; font-weight:600;
+    color:var(--text); letter-spacing:0.5px;
+    border-bottom:1px solid var(--border);
+    user-select:none;
+  }
+  .panel-scroll {
+    flex:1; overflow-y:auto; padding:8px 0;
+    scrollbar-width:thin; scrollbar-color:var(--slider-track) transparent;
+  }
+  .panel-scroll::-webkit-scrollbar { width:5px; }
+  .panel-scroll::-webkit-scrollbar-track { background:transparent; }
+  .panel-scroll::-webkit-scrollbar-thumb { background:var(--slider-track); border-radius:3px; }
+
+  .section {
+    padding:10px 20px; border-bottom:1px solid var(--border);
+  }
+  .section-title {
+    font-size:11px; font-weight:600; text-transform:uppercase;
+    letter-spacing:1.5px; color:#6c7086; margin-bottom:10px;
+    user-select:none;
+  }
+  .control { margin-bottom:12px; }
+  .control:last-child { margin-bottom:0; }
+  .control label {
+    display:flex; justify-content:space-between; align-items:center;
+    font-size:12px; color:#a6adc8; margin-bottom:4px;
+    user-select:none;
+  }
+  .control label .val { color:var(--accent); font-weight:500; font-variant-numeric:tabular-nums; font-family:'SF Mono','JetBrains Mono','Cascadia Code',monospace; }
+  .control input[type=range] {
+    -webkit-appearance:none; width:100%; height:6px;
+    border-radius:3px; background:var(--slider-track);
+    outline:none; cursor:pointer;
+  }
+  .control input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:16px; height:16px;
+    border-radius:50%; background:var(--accent);
+    cursor:pointer; border:2px solid rgba(0,0,0,0.3);
+    transition:transform 0.15s;
+  }
+  .control input[type=range]::-webkit-slider-thumb:active { transform:scale(1.25); }
+  .control input[type=text] {
+    width:100%; padding:8px 12px; border-radius:8px;
+    border:1px solid var(--border); background:rgba(0,0,0,0.3);
+    color:var(--text); font-size:13px; outline:none;
+    transition:border-color 0.2s;
+  }
+  .control input[type=text]:focus { border-color:var(--accent); }
+  .control input[type=color] {
+    -webkit-appearance:none; width:100%; height:32px;
+    border-radius:8px; border:1px solid var(--border);
+    background:transparent; cursor:pointer; padding:2px;
+  }
+  .control input[type=color]::-webkit-color-swatch-wrapper { padding:0; }
+  .control input[type=color]::-webkit-color-swatch { border-radius:6px; border:none; }
+
+  .btn-row { display:flex; gap:6px; flex-wrap:wrap; }
+  .btn {
+    padding:6px 14px; border-radius:20px; border:1px solid var(--border);
+    background:rgba(255,255,255,0.06); color:var(--text);
+    font-size:11px; cursor:pointer; transition:all 0.2s;
+    white-space:nowrap;
+    font-family:inherit;
+  }
+  .btn:hover { background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.2); }
+  .btn.active { background:var(--accent); color:#1e1e2e; border-color:var(--accent); font-weight:600; }
+  .hidden { display:none !important; }
+  #uploadBtn { text-align:center; color:#a6adc8; }
+
+  /* hint text */
+  #hint {
+    position:fixed; bottom:40px; left:50%; transform:translateX(-50%);
+    color:rgba(255,255,255,0.35); font-size:13px; pointer-events:none;
+    transition:opacity 1s; letter-spacing:1px;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<button id="panel-toggle" title="Toggle Panel">☰</button>
+
+<div id="panel">
+  <div class="panel-header">✦ 粒子控制台</div>
+  <div class="panel-scroll">
+
+    <div class="section">
+      <div class="section-title">内容</div>
+      <div class="control">
+        <label>模式</label>
+        <div class="btn-row" id="contentModeBtns">
+          <button class="btn active" data-cmode="text">文字</button>
+          <button class="btn" data-cmode="image">图片</button>
+        </div>
+      </div>
+      <div class="control" id="textInputWrap">
+        <label>输入文字</label>
+        <input type="text" id="textInput" value="你好" maxlength="20" placeholder="输入文字...">
+      </div>
+      <div class="control" id="textDirWrap">
+        <label>文字方向</label>
+        <div class="btn-row" id="textDirBtns">
+          <button class="btn active" data-dir="horizontal">横排</button>
+          <button class="btn" data-dir="vertical">竖排</button>
+        </div>
+      </div>
+      <div class="control hidden" id="imageUploadWrap">
+        <label>上传图片</label>
+        <input type="file" id="imageFile" accept="image/*" style="display:none;">
+        <button class="btn" id="uploadBtn" style="width:100%;padding:10px;">选择图片文件...</button>
+        <div id="imgPreview" style="margin-top:6px;font-size:11px;color:#6c7086;display:none;"></div>
+      </div>
+      <div class="control hidden" id="imgScaleWrap">
+        <label>图片缩放 <span class="val" id="imgScaleVal">1.00</span></label>
+        <input type="range" id="imgScale" min="0.2" max="3" value="1" step="0.01">
+      </div>
+      <div class="control hidden" id="imgPosXWrap">
+        <label>水平位置 <span class="val" id="imgXVal">0</span></label>
+        <input type="range" id="imgX" min="-400" max="400" value="0" step="1">
+      </div>
+      <div class="control hidden" id="imgPosYWrap">
+        <label>垂直位置 <span class="val" id="imgYVal">0</span></label>
+        <input type="range" id="imgY" min="-400" max="400" value="0" step="1">
+      </div>
+      <div class="control">
+        <label>字号 <span class="val" id="fontSizeVal">140</span></label>
+        <input type="range" id="fontSize" min="40" max="300" value="140" step="1">
+      </div>
+      <div class="control">
+        <label>采样密度 <span class="val" id="densityVal">3</span></label>
+        <input type="range" id="density" min="1" max="8" value="3" step="1">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">粒子外观</div>
+      <div class="control">
+        <label>粒子大小 <span class="val" id="pSizeVal">2.5</span></label>
+        <input type="range" id="pSize" min="0.5" max="8" value="2.5" step="0.1">
+      </div>
+      <div class="control">
+        <label>粒子颜色</label>
+        <input type="color" id="pColor" value="#f5e0dc">
+      </div>
+      <div class="control">
+        <label>发光强度 <span class="val" id="glowVal">8</span></label>
+        <input type="range" id="glow" min="0" max="30" value="8" step="1">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">作用力</div>
+      <div class="control">
+        <label>作用半径 <span class="val" id="radiusVal">150</span></label>
+        <input type="range" id="radius" min="30" max="400" value="150" step="1">
+      </div>
+      <div class="control">
+        <label>推力 Push <span class="val" id="pushVal">1.00</span></label>
+        <input type="range" id="push" min="0" max="3" value="1" step="0.01">
+      </div>
+      <div class="control">
+        <label>漩涡 Swirl <span class="val" id="swirlVal">0.50</span></label>
+        <input type="range" id="swirl" min="0" max="3" value="0.5" step="0.01">
+      </div>
+      <div class="control">
+        <label>引力 Attract <span class="val" id="attractVal">0.10</span></label>
+        <input type="range" id="attract" min="0" max="2" value="0.1" step="0.01">
+      </div>
+      <div class="control">
+        <label>湍流 Turbulence <span class="val" id="turbVal">0.40</span></label>
+        <input type="range" id="turb" min="0" max="2" value="0.4" step="0.01">
+      </div>
+      <div class="control">
+        <label>波浪 Wave <span class="val" id="waveVal">0.15</span></label>
+        <input type="range" id="wave" min="0" max="1" value="0.15" step="0.01">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">物理</div>
+      <div class="control">
+        <label>弹性系数 <span class="val" id="springVal">0.025</span></label>
+        <input type="range" id="spring" min="0.001" max="0.2" value="0.025" step="0.001">
+      </div>
+      <div class="control">
+        <label>阻尼 <span class="val" id="dampingVal">0.93</span></label>
+        <input type="range" id="damping" min="0.7" max="0.99" value="0.93" step="0.01">
+      </div>
+      <div class="control">
+        <label>最大速度 <span class="val" id="maxVelVal">18</span></label>
+        <input type="range" id="maxVel" min="2" max="40" value="18" step="0.5">
+      </div>
+      <div class="control">
+        <label>轨迹拖尾 <span class="val" id="trailVal">0.15</span></label>
+        <input type="range" id="trail" min="0" max="0.5" value="0.15" step="0.01">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">背景</div>
+      <div class="control">
+        <label>背景颜色</label>
+        <input type="color" id="bgColor" value="#0f0f1a">
+      </div>
+      <div class="control">
+        <label>背景渐变强度 <span class="val" id="bgGradVal">0.5</span></label>
+        <input type="range" id="bgGrad" min="0" max="1" value="0.5" step="0.01">
+      </div>
+      <div class="control">
+        <label>背景图片</label>
+        <input type="file" id="bgImageFile" accept="image/*" style="display:none;">
+        <div class="btn-row">
+          <button class="btn" id="bgUploadBtn" style="flex:1;">选择背景图...</button>
+          <button class="btn" id="bgClearBtn" style="display:none;">清除</button>
+        </div>
+        <div id="bgPreview" style="margin-top:4px;font-size:11px;color:#6c7086;display:none;"></div>
+      </div>
+      <div id="bgImgControls" class="hidden">
+        <div class="control">
+          <label>图片缩放 <span class="val" id="bgScaleVal">1.00</span></label>
+          <input type="range" id="bgScale" min="0.3" max="3" value="1" step="0.01">
+        </div>
+        <div class="control">
+          <label>图片透明度 <span class="val" id="bgOpacityVal">1.00</span></label>
+          <input type="range" id="bgOpacity" min="0" max="1" value="1" step="0.01">
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">音效</div>
+      <div class="control">
+        <label>启用音效</label>
+        <input type="checkbox" id="soundEnabled" checked style="accent-color:var(--accent);width:16px;height:16px;">
+      </div>
+      <div class="control">
+        <label>音效模式</label>
+        <div class="btn-row" id="soundModeBtns">
+          <button class="btn active" data-mode="wind">风声 Wind</button>
+          <button class="btn" data-mode="water">水流 Water</button>
+        </div>
+      </div>
+      <div class="control">
+        <label>音量 <span class="val" id="volVal">0.25</span></label>
+        <input type="range" id="volume" min="0" max="1" value="0.25" step="0.01">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">录制 & 截图</div>
+      <div class="control">
+        <button class="btn" id="screenshotBtn" style="width:100%;padding:10px;">📷 截图保存</button>
+      </div>
+      <div class="control">
+        <button class="btn" id="recordBtn" style="width:100%;padding:10px;">⏺ 开始录制</button>
+      </div>
+      <div id="recordStatus" style="font-size:11px;color:#f38ba8;text-align:center;display:none;margin-top:-6px;">
+        ● 录制中...
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">预设</div>
+      <div class="btn-row">
+        <button class="btn preset" data-preset="default">默认</button>
+        <button class="btn preset" data-preset="gentle">轻风</button>
+        <button class="btn preset" data-preset="storm">风暴</button>
+        <button class="btn preset" data-preset="swirl">漩涡</button>
+        <button class="btn preset" data-preset="water">水流</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="hint">移动鼠标拂过文字 · 双击绽放烟花</div>
+
+<script>
+// ── Multi-mode Audio Engine ─────────────────────────────
+class SandAudio {
+  constructor() {
+    this.ctx = null;
+    this.initialized = false;
+    this.mode = 'wind';
+    this.currentGain = 0;
+    this.noiseBuf = null;
+    this.src1 = null;  this.src2 = null;
+    this.filt1 = null; this.filt2 = null;
+    this.gain1 = null; this.gain2 = null;
+    this.masterGain = null;
+    this.streamDest = null;
+  }
+
+  init() {
+    if (this.initialized) return;
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch(e) { return; }
+
+    const sr = this.ctx.sampleRate;
+    const len = sr * 3;
+    this.noiseBuf = this.ctx.createBuffer(1, len, sr);
+    const d = this.noiseBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+
+    // Chain 1
+    this.src1 = this.ctx.createBufferSource();
+    this.src1.buffer = this.noiseBuf;
+    this.src1.loop = true;
+    this.filt1 = this.ctx.createBiquadFilter();
+    this.gain1 = this.ctx.createGain();
+    this.src1.connect(this.filt1);
+    this.filt1.connect(this.gain1);
+
+    // Chain 2
+    this.src2 = this.ctx.createBufferSource();
+    this.src2.buffer = this.noiseBuf;
+    this.src2.loop = true;
+    this.filt2 = this.ctx.createBiquadFilter();
+    this.gain2 = this.ctx.createGain();
+    this.src2.connect(this.filt2);
+    this.filt2.connect(this.gain2);
+
+    // Master
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0;
+    this.gain1.connect(this.masterGain);
+    this.gain2.connect(this.masterGain);
+    this.streamDest = this.ctx.createMediaStreamDestination();
+    this.masterGain.connect(this.ctx.destination);
+    this.masterGain.connect(this.streamDest);
+
+    this.src1.start();
+    this.src2.start();
+    this.setMode('wind');
+    this.initialized = true;
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+    if (!this.initialized) return;
+    if (mode === 'wind') {
+      // Deep rumbling wind: lowpass filters, slow modulation
+      this.filt1.type = 'lowpass';
+      this.filt1.frequency.value = 380;
+      this.filt1.Q.value = 0.5;
+      this.gain1.gain.value = 0.7;
+
+      this.filt2.type = 'lowpass';
+      this.filt2.frequency.value = 180;
+      this.filt2.Q.value = 0.3;
+      this.gain2.gain.value = 0.5;
+    } else {
+      // Rushing water: bandpass filters, brighter and faster
+      this.filt1.type = 'bandpass';
+      this.filt1.frequency.value = 2200;
+      this.filt1.Q.value = 0.6;
+      this.gain1.gain.value = 0.8;
+
+      this.filt2.type = 'bandpass';
+      this.filt2.frequency.value = 4200;
+      this.filt2.Q.value = 0.5;
+      this.gain2.gain.value = 0.5;
+    }
+  }
+
+  update(activity, volume) {
+    if (!this.initialized || !this.ctx) return;
+    const target = activity * volume;
+    this.currentGain += (target - this.currentGain) * 0.25;
+    const g = Math.max(0, Math.min(1, this.currentGain));
+    const now = this.ctx.currentTime;
+    this.masterGain.gain.linearRampToValueAtTime(g, now + 0.08);
+
+    if (this.mode === 'wind') {
+      // Slow gusts: modulate filter frequency with a wide, lazy LFO
+      const t = now;
+      const gust = Math.sin(t * 0.25) * 0.5 + Math.sin(t * 0.17 + 1.2) * 0.3 + Math.sin(t * 0.08) * 0.2;
+      const f1 = 250 + activity * 350 + gust * 180;
+      const f2 = 100 + activity * 200 + gust * 100;
+      this.filt1.frequency.linearRampToValueAtTime(Math.max(60, f1), now + 0.2);
+      this.filt2.frequency.linearRampToValueAtTime(Math.max(40, f2), now + 0.2);
+      this.filt1.Q.linearRampToValueAtTime(0.3 + activity * 0.5, now + 0.2);
+      this.filt2.Q.linearRampToValueAtTime(0.2 + activity * 0.3, now + 0.2);
+    } else {
+      // Fast turbulent water: quicker, narrower modulation
+      const t = now;
+      const ripple = Math.sin(t * 3.2) * 0.5 + Math.sin(t * 5.7 + 0.8) * 0.3 + Math.sin(t * 8.1) * 0.2;
+      const f1 = 1600 + activity * 2200 + ripple * 600;
+      const f2 = 2800 + activity * 2500 + ripple * 700;
+      this.filt1.frequency.linearRampToValueAtTime(Math.max(300, f1), now + 0.06);
+      this.filt2.frequency.linearRampToValueAtTime(Math.max(600, f2), now + 0.06);
+      this.filt1.Q.linearRampToValueAtTime(0.4 + activity * 2.0, now + 0.06);
+      this.filt2.Q.linearRampToValueAtTime(0.3 + activity * 1.2, now + 0.06);
+    }
+  }
+
+  playFirework(vol) {
+    if (!this.initialized || !this.ctx) return;
+    const ctx = this.ctx;
+    const sr = ctx.sampleRate;
+    const dur = 1.0;
+    const len = Math.floor(sr * dur);
+    const buf = ctx.createBuffer(1, len, sr);
+    const d = buf.getChannelData(0);
+
+    for (let i = 0; i < len; i++) {
+      const t = i / sr;
+      // Sharp initial crack — fast noise burst
+      const crack = (Math.random() * 2 - 1) * Math.exp(-t * 32);
+      // Mid rumble — slower noise decay
+      const rumble = (Math.random() * 2 - 1) * Math.exp(-t * 7) * 0.45;
+      // Deep boom — sine sweep 120→25 Hz
+      const boomFreq = Math.max(25, 120 - t * 130);
+      const boom = Math.sin(2 * Math.PI * boomFreq * t) * Math.exp(-t * 4.5) * 0.55;
+      // Delayed scatter crackles
+      const scatEnv = (t > 0.02 ? 1 : 0) * Math.exp(-Math.max(0, t - 0.02) * 18);
+      const scatter = (Math.random() * 2 - 1) * scatEnv * 0.35;
+
+      d[i] = (crack * 0.55 + rumble * 0.35 + boom * 0.55 + scatter * 0.3) * vol;
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const g = ctx.createGain();
+    g.gain.value = 1.1;
+    src.connect(g);
+    g.connect(ctx.destination);
+    if (this.streamDest) g.connect(this.streamDest);
+    src.start();
+  }
+
+  suspend() {
+    if (this.ctx && this.ctx.state === 'running') this.ctx.suspend();
+  }
+}
+
+// ── Particle ───────────────────────────────────────────
+class Particle {
+  constructor(x, y) {
+    this.homeX = x;
+    this.homeY = y;
+    this.x = x + (Math.random() - 0.5) * 2;
+    this.y = y + (Math.random() - 0.5) * 2;
+    this.vx = 0;
+    this.vy = 0;
+    this.phase = Math.random() * Math.PI * 2;
+    this.sizeRand = 0.7 + Math.random() * 0.6;
+    this.color = null;
+    this.life = 1;
+  }
+}
+
+// ── Main App ───────────────────────────────────────────
+class ParticleTextApp {
+  constructor() {
+    this.canvas = document.getElementById('c');
+    this.ctx = this.canvas.getContext('2d');
+    this.particles = [];
+    this.mouse = { x: -9999, y: -9999, active: false };
+    this.audio = new SandAudio();
+    this.time = 0;
+    this.totalActivity = 0;
+    this.fireworkActive = false;
+    this.flash = { x: 0, y: 0, radius: 0, alpha: 0 };
+    this.recording = false;
+    this.mediaRecorder = null;
+    this.recordedChunks = [];
+
+    this.generatedText = '你好';
+    this.storedImage = null;
+    this.bgImage = null;
+    this.config = {
+      contentMode: 'text',
+      textDirection: 'horizontal',
+      imgScale: 1,
+      imgX: 0,
+      imgY: 0,
+      text: '你好',
+      fontSize: 140,
+      density: 3,
+      pSize: 2.5,
+      pColor: '#f5e0dc',
+      glow: 8,
+      forceRadius: 150,
+      pushWeight: 1.0,
+      swirlWeight: 0.5,
+      attractWeight: 0.1,
+      turbWeight: 0.4,
+      waveWeight: 0.15,
+      spring: 0.025,
+      damping: 0.93,
+      maxVel: 18,
+      trail: 0.15,
+      bgColor: '#0f0f1a',
+      bgGrad: 0.5,
+      bgScale: 1,
+      bgOpacity: 1,
+      soundEnabled: true,
+      volume: 0.25,
+      soundMode: 'wind',
+    };
+
+    this.resize();
+    this.bindEvents();
+    this.bindUI();
+    this.generateParticles();
+    this.loop();
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    this.W = window.innerWidth;
+    this.H = window.innerHeight;
+    this.canvas.width = this.W * dpr;
+    this.canvas.height = this.H * dpr;
+    this.canvas.style.width = this.W + 'px';
+    this.canvas.style.height = this.H + 'px';
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // ── Text / Image → Particles ──────────────────────
+  generateParticles() {
+    this.generatedText = this.config.text;
+    this.particles = [];
+
+    if (this.config.contentMode === 'image' && this.storedImage) {
+      this._generateFromImage();
+    } else {
+      this._generateFromText();
+    }
+
+    if (this.particles.length < 50 && this.config.density > 1) {
+      this.config.density = Math.max(1, this.config.density - 1);
+      this.generateParticles();
+    }
+  }
+
+  _generateFromText() {
+    const off = document.createElement('canvas');
+    const octx = off.getContext('2d');
+    const fontSize = this.config.fontSize;
+    const font = `bold ${fontSize}px "PingFang SC","Microsoft YaHei","Hiragino Sans GB",system-ui,sans-serif`;
+    octx.font = font;
+    const text = this.config.text;
+    const vertical = this.config.textDirection === 'vertical';
+    const chars = [...text];
+
+    let tw, th;
+    if (vertical) {
+      const cw = Math.ceil(fontSize * 1.3);
+      tw = cw;
+      th = cw * chars.length;
+      off.width = tw + 20;
+      off.height = th + 20;
+      octx.fillStyle = '#ffffff';
+      octx.font = font;
+      octx.textBaseline = 'top';
+      octx.textAlign = 'center';
+      for (let i = 0; i < chars.length; i++) {
+        octx.fillText(chars[i], off.width / 2, 10 + i * cw);
+      }
+    } else {
+      const metrics = octx.measureText(text);
+      tw = Math.ceil(metrics.width);
+      th = Math.ceil(fontSize * 1.3);
+      off.width = tw + 20;
+      off.height = th + 20;
+      octx.fillStyle = '#ffffff';
+      octx.font = font;
+      octx.textBaseline = 'top';
+      octx.textAlign = 'left';
+      octx.fillText(text, 10, 10);
+    }
+
+    const img = octx.getImageData(0, 0, off.width, off.height);
+    const step = this.config.density;
+    const ox = (this.W - tw) / 2 - 10;
+    const oy = (this.H - th) / 2 - 10;
+
+    for (let y = 0; y < off.height; y += step) {
+      for (let x = 0; x < off.width; x += step) {
+        const idx = (y * off.width + x) * 4;
+        if (img.data[idx + 3] > 100) {
+          this.particles.push(new Particle(ox + x, oy + y));
+        }
+      }
+    }
+  }
+
+  _generateFromImage() {
+    const img = this.storedImage;
+    const maxW = this.W * 0.7;
+    const maxH = this.H * 0.7;
+    const fitScale = Math.min(maxW / img.width, maxH / img.height, 1);
+    const userScale = this.config.imgScale;
+    const scale = fitScale * userScale;
+    const dw = Math.floor(img.width * scale);
+    const dh = Math.floor(img.height * scale);
+
+    const off = document.createElement('canvas');
+    off.width = dw;
+    off.height = dh;
+    const octx = off.getContext('2d');
+    octx.drawImage(img, 0, 0, dw, dh);
+
+    const data = octx.getImageData(0, 0, dw, dh);
+    const step = this.config.density;
+    const ox = (this.W - dw) / 2 + this.config.imgX;
+    const oy = (this.H - dh) / 2 + this.config.imgY;
+
+    for (let y = 0; y < dh; y += step) {
+      for (let x = 0; x < dw; x += step) {
+        const idx = (y * dw + x) * 4;
+        const alpha = data.data[idx + 3];
+        if (alpha > 80) {
+          const r = data.data[idx];
+          const g = data.data[idx + 1];
+          const b = data.data[idx + 2];
+          const p = new Particle(ox + x, oy + y);
+          p.color = `rgb(${r},${g},${b})`;
+          this.particles.push(p);
+        }
+      }
+    }
+  }
+
+  // ── Screenshot ─────────────────────────────────────
+  takeScreenshot() {
+    const link = document.createElement('a');
+    link.download = `particle-text-${Date.now()}.png`;
+    link.href = this.canvas.toDataURL('image/png');
+    link.click();
+  }
+
+  // ── Recording ──────────────────────────────────────
+  startRecording() {
+    if (this.recording) return;
+
+    // Init audio if needed so streamDest is available
+    if (!this.audio.initialized) this.audio.init();
+
+    const videoStream = this.canvas.captureStream(30);
+    const videoTrack = videoStream.getVideoTracks()[0];
+
+    // Combine video + audio tracks
+    let combinedStream;
+    if (this.audio.streamDest) {
+      const audioTrack = this.audio.streamDest.stream.getAudioTracks()[0];
+      combinedStream = new MediaStream([videoTrack, audioTrack]);
+    } else {
+      combinedStream = videoStream;
+    }
+
+    this.recordedChunks = [];
+
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9'
+      : 'video/webm';
+
+    try {
+      this.mediaRecorder = new MediaRecorder(combinedStream, { mimeType: mime });
+    } catch (e) {
+      this.mediaRecorder = new MediaRecorder(combinedStream);
+    }
+
+    this.mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) this.recordedChunks.push(e.data);
+    };
+
+    this.mediaRecorder.onstop = () => {
+      // Stop all tracks
+      videoTrack.stop();
+      const blob = new Blob(this.recordedChunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.download = `particle-text-${Date.now()}.webm`;
+      link.href = url;
+      link.click();
+      URL.revokeObjectURL(url);
+    };
+
+    this.mediaRecorder.start();
+    this.recording = true;
+
+    document.getElementById('recordBtn').textContent = '⏹ 停止录制';
+    document.getElementById('recordStatus').style.display = 'block';
+  }
+
+  stopRecording() {
+    if (!this.recording || !this.mediaRecorder) return;
+    if (this.mediaRecorder.state === 'recording') {
+      this.mediaRecorder.stop();
+    }
+    this.recording = false;
+
+    document.getElementById('recordBtn').textContent = '⏺ 开始录制';
+    document.getElementById('recordStatus').style.display = 'none';
+  }
+
+  // ── Firework Explosion ─────────────────────────────
+  triggerFirework(x, y) {
+    this.fireworkActive = true;
+    this.mouse.active = false;
+
+    // Flash
+    this.flash = { x, y, radius: 0, alpha: 0.9 };
+
+    const count = this.particles.length;
+
+    // 3 random firework colors
+    const fwColors = [];
+    for (let i = 0; i < 3; i++) {
+      fwColors.push(`hsl(${Math.random() * 360}, ${75 + Math.random() * 25}%, ${50 + Math.random() * 40}%)`);
+    }
+
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      const dx = p.x - x;
+      const dy = p.y - y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const baseSpeed = 1.5 + Math.random() * 10;
+      const distFactor = 0.3 + Math.min(dist / 300, 1.5);
+      const speed = baseSpeed * distFactor;
+      p.vx = (dx / dist) * speed + (Math.random() - 0.5) * 5;
+      p.vy = (dy / dist) * speed + (Math.random() - 0.5) * 5 - Math.random() * 4;
+      p.color = fwColors[Math.floor(Math.random() * 3)];
+      p.life = 0.6 + Math.random() * 0.4;
+    }
+
+    // Extra sparks at click point
+    const sparkCount = Math.min(count * 0.6, 300) | 0;
+    for (let i = 0; i < sparkCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 3 + Math.random() * 14;
+      const spark = new Particle(x, y);
+      spark.homeX = x;
+      spark.homeY = y;
+      spark.vx = Math.cos(angle) * speed;
+      spark.vy = Math.sin(angle) * speed - Math.random() * 5;
+      spark.color = fwColors[Math.floor(Math.random() * 3)];
+      spark.life = 0.4 + Math.random() * 0.5;
+      spark.sizeRand = 0.5 + Math.random() * 1;
+      this.particles.push(spark);
+    }
+
+    // Firework sound
+    if (this.config.soundEnabled) {
+      if (!this.audio.initialized) this.audio.init();
+      if (this.audio.ctx && this.audio.ctx.state === 'suspended') this.audio.ctx.resume();
+      this.audio.playFirework(this.config.volume);
+    }
+  }
+
+  // ── Update loop ────────────────────────────────────
+  update() {
+    const cfg = this.config;
+
+    // Firework physics
+    if (this.fireworkActive) {
+      for (let i = this.particles.length - 1; i >= 0; i--) {
+        const p = this.particles[i];
+        p.vy += 0.055;
+        p.vx *= 0.986;
+        p.vy *= 0.986;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 0.009;
+      }
+      this.particles = this.particles.filter(p => p.life > 0);
+
+      // Flash decay
+      this.flash.radius += 12;
+      this.flash.alpha -= 0.03;
+
+      // Audio during firework
+      const remainingRatio = this.particles.length / Math.max(1, this.particles.length + 50);
+      const activity = Math.max(0, remainingRatio * 1.5);
+      this.totalActivity += (activity - this.totalActivity) * 0.5;
+      if (cfg.soundEnabled) {
+        if (!this.audio.initialized) this.audio.init();
+        if (this.audio.ctx && this.audio.ctx.state === 'suspended') this.audio.ctx.resume();
+        this.audio.update(Math.min(1, this.totalActivity), cfg.volume * 1.3);
+      }
+
+      // All gone → regenerate text
+      if (this.particles.length === 0) {
+        this.fireworkActive = false;
+        this.generateParticles();
+      }
+      return;
+    }
+
+    // Normal physics
+    const mx = this.mouse.x;
+    const my = this.mouse.y;
+    const active = this.mouse.active;
+    let totalKE = 0;
+
+    const r2 = cfg.forceRadius * cfg.forceRadius;
+
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      let fx = 0, fy = 0;
+
+      const dx = p.x - mx;
+      const dy = p.y - my;
+      const dist2 = dx * dx + dy * dy;
+
+      if (active && dist2 < r2 && dist2 > 0.01) {
+        const dist = Math.sqrt(dist2);
+        const falloff = 1 - dist / cfg.forceRadius;
+        const f2 = falloff * falloff;
+        const invDist = 1 / dist;
+        const nx = dx * invDist;
+        const ny = dy * invDist;
+
+        // Push
+        const pushF = f2 * cfg.pushWeight * 1.8;
+        fx += nx * pushF;
+        fy += ny * pushF;
+
+        // Swirl (perpendicular)
+        const swirlF = f2 * cfg.swirlWeight * 1.2;
+        fx += -ny * swirlF;
+        fy += nx * swirlF;
+
+        // Attract (peaks at mid-distance)
+        const af = falloff * (1 - falloff) * cfg.attractWeight * 2.5;
+        fx += -nx * af;
+        fy += -ny * af;
+
+        // Turbulence
+        const turbF = f2 * cfg.turbWeight * 3;
+        fx += (Math.random() - 0.5) * turbF;
+        fy += (Math.random() - 0.5) * turbF;
+
+        // Wave
+        const waveF = f2 * cfg.waveWeight * 1.5;
+        fx += Math.sin(this.time * 4 + p.phase) * waveF;
+        fy += Math.cos(this.time * 3.7 + p.phase + 1) * waveF;
+      }
+
+      // Spring force
+      fx += (p.homeX - p.x) * cfg.spring;
+      fy += (p.homeY - p.y) * cfg.spring;
+
+      // Integrate
+      p.vx = (p.vx + fx) * cfg.damping;
+      p.vy = (p.vy + fy) * cfg.damping;
+
+      // Clamp velocity
+      const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+      if (speed > cfg.maxVel) {
+        const s = cfg.maxVel / speed;
+        p.vx *= s;
+        p.vy *= s;
+      }
+
+      p.x += p.vx;
+      p.y += p.vy;
+
+      totalKE += speed;
+    }
+
+    // Normalize activity for audio
+    const count = Math.max(1, this.particles.length);
+    this.totalActivity += (totalKE / (count * cfg.maxVel) - this.totalActivity) * 0.3;
+
+    // Audio
+    if (cfg.soundEnabled) {
+      if (!this.audio.initialized) this.audio.init();
+      if (this.audio.ctx && this.audio.ctx.state === 'suspended') {
+        this.audio.ctx.resume();
+      }
+      this.audio.update(Math.min(1, this.totalActivity * 2.5), cfg.volume);
+    } else if (this.audio.initialized) {
+      this.audio.update(0, 0);
+    }
+  }
+
+  // ── Render ─────────────────────────────────────────
+  render() {
+    const ctx = this.ctx;
+    const cfg = this.config;
+    const W = this.W;
+    const H = this.H;
+
+    // Helper: draw background image cover
+    const drawBgImage = () => {
+      if (!this.bgImage) return;
+      const iw = this.bgImage.width;
+      const ih = this.bgImage.height;
+      const coverScale = Math.max(W / iw, H / ih);
+      const userScale = cfg.bgScale;
+      const scale = coverScale * userScale;
+      const sw = iw * scale;
+      const sh = ih * scale;
+      const opacity = cfg.bgOpacity;
+      if (opacity < 1) ctx.globalAlpha = opacity;
+      ctx.drawImage(this.bgImage, (W - sw) / 2, (H - sh) / 2, sw, sh);
+      if (opacity < 1) ctx.globalAlpha = 1;
+    };
+
+    // Firework mode: dark background, colored particles with fade
+    if (this.fireworkActive) {
+      drawBgImage();
+      ctx.fillStyle = cfg.bgColor;
+      ctx.globalAlpha = this.bgImage ? 0.35 : 0.25;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+
+      // Flash
+      if (this.flash.alpha > 0) {
+        const grad = ctx.createRadialGradient(this.flash.x, this.flash.y, 0, this.flash.x, this.flash.y, this.flash.radius);
+        grad.addColorStop(0, `rgba(255,255,240,${this.flash.alpha})`);
+        grad.addColorStop(0.4, `rgba(255,220,180,${this.flash.alpha * 0.6})`);
+        grad.addColorStop(1, `rgba(255,150,100,0)`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      // Particles with firework colors
+      ctx.shadowBlur = 6;
+      const baseSize = cfg.pSize;
+      for (let i = 0; i < this.particles.length; i++) {
+        const p = this.particles[i];
+        if (p.life <= 0) continue;
+        const c = p.color || cfg.pColor;
+        ctx.fillStyle = c;
+        ctx.shadowColor = c;
+        ctx.globalAlpha = Math.min(1, p.life * 2);
+        const size = baseSize * p.sizeRand * (0.5 + p.life * 0.5);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+      return;
+    }
+
+    // Normal mode
+    // Background image or solid/gradient
+    drawBgImage();
+
+    const trailAlpha = cfg.trail;
+    if (trailAlpha > 0) {
+      ctx.fillStyle = cfg.bgColor;
+      ctx.globalAlpha = trailAlpha;
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    } else if (!this.bgImage) {
+      const r = parseInt(cfg.bgColor.slice(1,3), 16);
+      const g = parseInt(cfg.bgColor.slice(3,5), 16);
+      const b = parseInt(cfg.bgColor.slice(5,7), 16);
+      const grad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H)*0.7);
+      const brighten = cfg.bgGrad * 30;
+      grad.addColorStop(0, `rgb(${Math.min(255,r+brighten)},${Math.min(255,g+brighten)},${Math.min(255,b+brighten)})`);
+      grad.addColorStop(1, cfg.bgColor);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Particles
+    const pColor = cfg.pColor;
+    const glow = cfg.glow;
+    const isImageMode = cfg.contentMode === 'image';
+    ctx.fillStyle = pColor;
+    if (glow > 0 && !isImageMode) {
+      ctx.shadowColor = pColor;
+      ctx.shadowBlur = glow;
+    }
+
+    const baseSize = cfg.pSize;
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      const dx = p.x - p.homeX;
+      const dy = p.y - p.homeY;
+      const displacement = Math.sqrt(dx*dx + dy*dy) / (cfg.forceRadius || 150);
+      const size = baseSize * p.sizeRand * (1 - displacement * 0.25);
+      if (size < 0.2) continue;
+      if (p.color) {
+        ctx.fillStyle = p.color;
+        if (glow > 0 && isImageMode) {
+          ctx.shadowColor = p.color;
+          ctx.shadowBlur = Math.max(1, glow * 0.5);
+        }
+      } else {
+        ctx.fillStyle = pColor;
+      }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.shadowBlur = 0;
+
+    // Mouse indicator — hidden during recording
+    if (this.mouse.active && !this.recording) {
+      ctx.beginPath();
+      ctx.arc(this.mouse.x, this.mouse.y, cfg.forceRadius, 0, Math.PI*2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 8]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Recording indicator
+    if (this.recording) {
+      const pulse = Math.sin(this.time * 5) * 0.4 + 0.6;
+      ctx.beginPath();
+      ctx.arc(20, 20, 5, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,50,50,${pulse})`;
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 10px "SF Pro","PingFang SC",system-ui,sans-serif';
+      ctx.fillText('REC', 32, 24);
+    }
+  }
+
+  // ── Main loop ──────────────────────────────────────
+  loop() {
+    this.time += 0.016;
+    this.update();
+    this.render();
+    requestAnimationFrame(() => this.loop());
+  }
+
+  // ── Events ─────────────────────────────────────────
+  bindEvents() {
+    window.addEventListener('resize', () => {
+      this.resize();
+      this.generateParticles();
+    });
+
+    this.canvas.addEventListener('mousemove', (e) => {
+      this.mouse.x = e.clientX;
+      this.mouse.y = e.clientY;
+      this.mouse.active = true;
+      const hint = document.getElementById('hint');
+      if (hint) hint.style.opacity = '0';
+    });
+
+    this.canvas.addEventListener('mouseleave', () => {
+      this.mouse.active = false;
+    });
+
+    this.canvas.addEventListener('mouseenter', (e) => {
+      this.mouse.x = e.clientX;
+      this.mouse.y = e.clientY;
+      this.mouse.active = true;
+    });
+
+    // Double-click firework
+    this.canvas.addEventListener('dblclick', (e) => {
+      if (this.fireworkActive) return;
+      this.triggerFirework(e.clientX, e.clientY);
+    });
+
+    // Touch
+    this.canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      const t = e.touches[0];
+      this.mouse.x = t.clientX;
+      this.mouse.y = t.clientY;
+      this.mouse.active = true;
+      const hint = document.getElementById('hint');
+      if (hint) hint.style.opacity = '0';
+    }, {passive: false});
+
+    this.canvas.addEventListener('touchend', () => {
+      this.mouse.active = false;
+    });
+
+    // Screenshot shortcut — 'S' key
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+        e.preventDefault();
+        this.takeScreenshot();
+      }
+    });
+
+    // Init audio on first interaction
+    const initAudio = () => {
+      if (!this.audio.initialized) this.audio.init();
+      window.removeEventListener('click', initAudio);
+      window.removeEventListener('touchstart', initAudio);
+    };
+    window.addEventListener('click', initAudio);
+    window.addEventListener('touchstart', initAudio);
+  }
+
+  // ── UI Bindings ────────────────────────────────────
+  bindUI() {
+    const bind = (id, key, transform) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const valEl = document.getElementById(id + 'Val');
+      el.addEventListener('input', () => {
+        const v = transform ? transform(el) : (el.type === 'checkbox' ? el.checked : parseFloat(el.value));
+        this.config[key] = v;
+        if (valEl) valEl.textContent = typeof v === 'number' ? v.toFixed(v < 1 ? 2 : 0) : v;
+        if (['fontSize', 'density', 'imgScale', 'imgX', 'imgY'].includes(key)) this.generateParticles();
+      });
+      el.addEventListener('change', () => {
+        if (['fontSize', 'density', 'imgScale', 'imgX', 'imgY'].includes(key)) {
+          this.generateParticles();
+        }
+      });
+    };
+
+    bind('textInput', 'text', (el) => el.value || '你好');
+    bind('fontSize', 'fontSize', (el) => parseInt(el.value));
+    bind('density', 'density', (el) => parseInt(el.value));
+    bind('imgScale', 'imgScale', (el) => parseFloat(el.value));
+    bind('imgX', 'imgX', (el) => parseInt(el.value));
+    bind('imgY', 'imgY', (el) => parseInt(el.value));
+    bind('pSize', 'pSize', (el) => parseFloat(el.value));
+    bind('pColor', 'pColor', (el) => el.value);
+    bind('glow', 'glow', (el) => parseInt(el.value));
+    bind('radius', 'forceRadius', (el) => parseInt(el.value));
+    bind('push', 'pushWeight', (el) => parseFloat(el.value));
+    bind('swirl', 'swirlWeight', (el) => parseFloat(el.value));
+    bind('attract', 'attractWeight', (el) => parseFloat(el.value));
+    bind('turb', 'turbWeight', (el) => parseFloat(el.value));
+    bind('wave', 'waveWeight', (el) => parseFloat(el.value));
+    bind('spring', 'spring', (el) => parseFloat(el.value));
+    bind('damping', 'damping', (el) => parseFloat(el.value));
+    bind('maxVel', 'maxVel', (el) => parseFloat(el.value));
+    bind('trail', 'trail', (el) => parseFloat(el.value));
+    bind('bgColor', 'bgColor', (el) => el.value);
+    bind('bgGrad', 'bgGrad', (el) => parseFloat(el.value));
+    bind('bgScale', 'bgScale', (el) => parseFloat(el.value));
+    bind('bgOpacity', 'bgOpacity', (el) => parseFloat(el.value));
+    bind('soundEnabled', 'soundEnabled', (el) => el.checked);
+    bind('volume', 'volume', (el) => parseFloat(el.value));
+
+    // Background image upload
+    const bgFileInput = document.getElementById('bgImageFile');
+    const bgUploadBtn = document.getElementById('bgUploadBtn');
+    const bgClearBtn = document.getElementById('bgClearBtn');
+    const bgPreview = document.getElementById('bgPreview');
+    bgUploadBtn.addEventListener('click', () => bgFileInput.click());
+    bgFileInput.addEventListener('change', () => {
+      const file = bgFileInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          this.bgImage = img;
+          bgPreview.textContent = `${img.width}×${img.height}`;
+          bgPreview.style.display = 'block';
+          bgClearBtn.style.display = 'inline-block';
+          document.getElementById('bgImgControls').classList.remove('hidden');
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+    bgClearBtn.addEventListener('click', () => {
+      this.bgImage = null;
+      bgFileInput.value = '';
+      bgPreview.style.display = 'none';
+      bgClearBtn.style.display = 'none';
+      document.getElementById('bgImgControls').classList.add('hidden');
+    });
+
+    // Screenshot & Recording buttons
+    document.getElementById('screenshotBtn').addEventListener('click', () => {
+      this.takeScreenshot();
+    });
+    document.getElementById('recordBtn').addEventListener('click', () => {
+      if (this.recording) {
+        this.stopRecording();
+      } else {
+        // Init audio context on user gesture for recording
+        if (!this.audio.initialized) this.audio.init();
+        this.startRecording();
+      }
+    });
+
+    // Toggle panel
+    const panel = document.getElementById('panel');
+    const toggle = document.getElementById('panel-toggle');
+    let panelVisible = true;
+    toggle.addEventListener('click', () => {
+      panelVisible = !panelVisible;
+      panel.classList.toggle('collapsed', !panelVisible);
+      toggle.textContent = panelVisible ? '☰' : '☰';
+    });
+
+    // Sound mode buttons
+    document.querySelectorAll('#soundModeBtns .btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#soundModeBtns .btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const mode = btn.dataset.mode;
+        this.config.soundMode = mode;
+        this.audio.setMode(mode);
+      });
+    });
+
+    // Content mode buttons (text / image)
+    const textWrap = document.getElementById('textInputWrap');
+    const imgWrap = document.getElementById('imageUploadWrap');
+    const textDirWrap = document.getElementById('textDirWrap');
+    const imgScaleWrap = document.getElementById('imgScaleWrap');
+    const imgPosXWrap = document.getElementById('imgPosXWrap');
+    const imgPosYWrap = document.getElementById('imgPosYWrap');
+    const toggleImageCtrls = (show) => {
+      const method = show ? 'remove' : 'add';
+      imgScaleWrap.classList[method]('hidden');
+      imgPosXWrap.classList[method]('hidden');
+      imgPosYWrap.classList[method]('hidden');
+    };
+    document.querySelectorAll('#contentModeBtns .btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#contentModeBtns .btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const mode = btn.dataset.cmode;
+        this.config.contentMode = mode;
+        if (mode === 'text') {
+          textWrap.classList.remove('hidden');
+          textDirWrap.classList.remove('hidden');
+          imgWrap.classList.add('hidden');
+          toggleImageCtrls(false);
+        } else {
+          textWrap.classList.add('hidden');
+          textDirWrap.classList.add('hidden');
+          imgWrap.classList.remove('hidden');
+          toggleImageCtrls(true);
+        }
+        if (mode === 'image' && this.storedImage) {
+          this.generateParticles();
+        } else if (mode === 'text') {
+          this.generateParticles();
+        }
+      });
+    });
+
+    // Text direction buttons
+    document.querySelectorAll('#textDirBtns .btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#textDirBtns .btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.config.textDirection = btn.dataset.dir;
+        if (this.config.contentMode === 'text') this.generateParticles();
+      });
+    });
+
+    // Image upload
+    const fileInput = document.getElementById('imageFile');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const imgPreview = document.getElementById('imgPreview');
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          this.storedImage = img;
+          imgPreview.textContent = `${img.width}×${img.height} · 已加载`;
+          imgPreview.style.display = 'block';
+          uploadBtn.textContent = '更换图片...';
+          this.generateParticles();
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Presets
+    const presets = {
+      default: { pushWeight:1, swirlWeight:0.5, attractWeight:0.1, turbWeight:0.4, waveWeight:0.15, spring:0.025, damping:0.93, maxVel:18, trail:0.15, forceRadius:150, bgColor:'#0f0f1a', pColor:'#f5e0dc', glow:8, soundMode:'wind' },
+      gentle:  { pushWeight:0.3, swirlWeight:0.2, attractWeight:0.05, turbWeight:0.15, waveWeight:0.08, spring:0.04, damping:0.95, maxVel:8, trail:0.08, forceRadius:200, bgColor:'#1a1a2e', pColor:'#e8d5c4', glow:4, soundMode:'wind' },
+      storm:   { pushWeight:2.5, swirlWeight:1.2, attractWeight:0, turbWeight:1.8, waveWeight:0.5, spring:0.015, damping:0.88, maxVel:35, trail:0.35, forceRadius:220, bgColor:'#0a0a14', pColor:'#ff6b6b', glow:18, soundMode:'wind' },
+      swirl:   { pushWeight:0.4, swirlWeight:2.5, attractWeight:0.3, turbWeight:0.3, waveWeight:0.1, spring:0.02, damping:0.91, maxVel:20, trail:0.12, forceRadius:180, bgColor:'#111122', pColor:'#a78bfa', glow:12, soundMode:'water' },
+      water:   { pushWeight:0.6, swirlWeight:0.8, attractWeight:0.4, turbWeight:0.2, waveWeight:0.8, spring:0.03, damping:0.94, maxVel:12, trail:0.05, forceRadius:160, bgColor:'#0c1924', pColor:'#7dd3fc', glow:10, soundMode:'water' },
+    };
+
+    document.querySelectorAll('.preset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const name = btn.dataset.preset;
+        const p = presets[name];
+        if (!p) return;
+        Object.entries(p).forEach(([key, val]) => {
+          this.config[key] = val;
+        });
+        this.audio.setMode(this.config.soundMode);
+        this.syncUIFromConfig();
+        this.generateParticles();
+      });
+    });
+
+    // Text input: regenerate on Enter or blur
+    const textInput = document.getElementById('textInput');
+    textInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const v = textInput.value || '你好';
+        this.config.text = v;
+        if (this.generatedText !== v) this.generateParticles();
+        textInput.blur();
+      }
+    });
+    textInput.addEventListener('blur', () => {
+      const v = textInput.value || '你好';
+      this.config.text = v;
+      if (this.generatedText !== v) this.generateParticles();
+    });
+  }
+
+  syncUIFromConfig() {
+    const cfg = this.config;
+    const map = {
+      textInput: ['text', v => v],
+      fontSize: ['fontSize', v => v],
+      density: ['density', v => v],
+      imgScale: ['imgScale', v => v],
+      imgX: ['imgX', v => v],
+      imgY: ['imgY', v => v],
+      pSize: ['pSize', v => v],
+      pColor: ['pColor', v => v],
+      glow: ['glow', v => v],
+      radius: ['forceRadius', v => v],
+      push: ['pushWeight', v => v],
+      swirl: ['swirlWeight', v => v],
+      attract: ['attractWeight', v => v],
+      turb: ['turbWeight', v => v],
+      wave: ['waveWeight', v => v],
+      spring: ['spring', v => v],
+      damping: ['damping', v => v],
+      maxVel: ['maxVel', v => v],
+      trail: ['trail', v => v],
+      bgColor: ['bgColor', v => v],
+      bgGrad: ['bgGrad', v => v],
+      bgScale: ['bgScale', v => v],
+      bgOpacity: ['bgOpacity', v => v],
+      volume: ['volume', v => v],
+      soundEnabled: ['soundEnabled', v => v],
+    };
+    Object.entries(map).forEach(([id, [key]]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const val = cfg[key];
+      if (el.type === 'checkbox') el.checked = val;
+      else if (el.type === 'range') el.value = val;
+      else if (el.type === 'text') el.value = val;
+      else if (el.type === 'color') el.value = val;
+      const valEl = document.getElementById(id + 'Val');
+      if (valEl) valEl.textContent = typeof val === 'number' ? val.toFixed(val < 1 ? 2 : 0) : val;
+    });
+
+    // Sound mode buttons
+    const modeBtns = document.querySelectorAll('#soundModeBtns .btn');
+    modeBtns.forEach(b => b.classList.remove('active'));
+    modeBtns.forEach(b => {
+      if (b.dataset.mode === cfg.soundMode) b.classList.add('active');
+    });
+
+    // Content mode buttons
+    const cmBtns = document.querySelectorAll('#contentModeBtns .btn');
+    cmBtns.forEach(b => b.classList.remove('active'));
+    cmBtns.forEach(b => {
+      if (b.dataset.cmode === cfg.contentMode) b.classList.add('active');
+    });
+    const textWrap2 = document.getElementById('textInputWrap');
+    const imgWrap2 = document.getElementById('imageUploadWrap');
+    const textDirWrap2 = document.getElementById('textDirWrap');
+    const imgScaleWrap2 = document.getElementById('imgScaleWrap');
+    const imgPosXWrap2 = document.getElementById('imgPosXWrap');
+    const imgPosYWrap2 = document.getElementById('imgPosYWrap');
+    const setImgCtrls = (show) => {
+      const m = show ? 'remove' : 'add';
+      imgScaleWrap2.classList[m]('hidden');
+      imgPosXWrap2.classList[m]('hidden');
+      imgPosYWrap2.classList[m]('hidden');
+    };
+    if (cfg.contentMode === 'image') {
+      textWrap2.classList.add('hidden');
+      textDirWrap2.classList.add('hidden');
+      imgWrap2.classList.remove('hidden');
+      setImgCtrls(true);
+    } else {
+      textWrap2.classList.remove('hidden');
+      textDirWrap2.classList.remove('hidden');
+      imgWrap2.classList.add('hidden');
+      setImgCtrls(false);
+    }
+
+    // Text direction buttons
+    const dirBtns = document.querySelectorAll('#textDirBtns .btn');
+    dirBtns.forEach(b => b.classList.remove('active'));
+    dirBtns.forEach(b => {
+      if (b.dataset.dir === cfg.textDirection) b.classList.add('active');
+    });
+
+    // Background image controls visibility
+    const bgImgCtrls = document.getElementById('bgImgControls');
+    if (this.bgImage) {
+      bgImgCtrls.classList.remove('hidden');
+    } else {
+      bgImgCtrls.classList.add('hidden');
+    }
+
+    // Background clear button visibility
+    const bgClear = document.getElementById('bgClearBtn');
+    if (this.bgImage) {
+      bgClear.style.display = 'inline-block';
+    } else {
+      bgClear.style.display = 'none';
+    }
+  }
+}
+
+// ── Boot ──────────────────────────────────────────────
+const app = new ParticleTextApp();
+</script>
+</body>
+</html>
